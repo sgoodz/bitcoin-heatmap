@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --neon-blue: #00f6ff;
+  --neon-pink: #ff007a;
+}
+
+.custom-tooltip {
+  background: #000 !important;
+  color: #00f6ff !important;
+  border: 2px solid #ff007a !important;
+}
+.custom-tooltip::before {
+  border-top-color: #ff007a !important;
+}
+
+.pulse-glow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.6;
+  }
+}
