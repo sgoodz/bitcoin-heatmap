@@ -2,30 +2,29 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { MapContainer, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { HeatmapLayer } from "react-leaflet-heatmap-layer-v3";
-import "leaflet.markercluster"; // Import marker cluster JS
-// Import CSS for Leaflet, MarkerCluster
+import "leaflet.markercluster";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
-// Optional: leaflet.heat CSS (usually handled by the library)
-// import 'leaflet.heat/dist/leaflet-heat.js';
+import AnalyticsDashboard from "./AnalyticsDashboard";
+import FilterPanel from "./FilterPanel";
 
 // --- Constants ---
 const BITNODES_API_URL = "https://bitnodes.io/api/v1/snapshots/latest/";
-const AGGREGATION_PRECISION = 1; // Coarser aggregation for heatmap visibility (adjust)
-const ZOOM_THRESHOLD = 9; // Zoom level to switch between heatmap and markers (adjust)
-const MAX_NODES_FOR_MARKERS = 10000; // Limit nodes passed to marker layer for performance
+const AGGREGATION_PRECISION = 1;
+const ZOOM_THRESHOLD = 9;
+const MAX_NODES_FOR_MARKERS = 10000;
 
 // --- Interfaces ---
 interface BitnodeRawData {
-  /* ... same as before ... */ protocolVersion: number;
+  protocolVersion: number;
   userAgent: string;
   connectedSince: number;
   services: string;
   height: number;
   hostname: string;
   city: string | null;
-  countryCode: string | null;
+  country: string | null;
   latitude: number;
   longitude: number;
   timezone: string | null;
@@ -33,15 +32,14 @@ interface BitnodeRawData {
   organization: string | null;
 }
 
-// For individual markers with details
 interface ProcessedNode {
   lat: number;
   lon: number;
-  // Include details needed for tooltips
   userAgent?: string;
   country?: string | null;
   protocolVersion?: number;
   organization?: string | null;
+  connectedSince?: number;
 }
 
 type HeatmapPoint = [lat: number, lon: number, intensity: number];
@@ -52,12 +50,29 @@ const useBitnodesData = () => {
   const [individualNodes, setIndividualNodes] = useState<ProcessedNode[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [maxIntensity, setMaxIntensity] = useState<number>(50); // Default max intensity
+  const [maxIntensity, setMaxIntensity] = useState<number>(50);
+  const [analytics, setAnalytics] = useState<{
+    totalNodes: number;
+    uniqueCountries: number;
+    topUserAgents?: { agent: string; count: number }[];
+    topOrganizations?: { org: string; count: number }[];
+    protocolVersions?: { version: number; count: number }[];
+    averageUptime?: number;
+    decentralizationScore?: number;
+  }>({
+    totalNodes: 0,
+    uniqueCountries: 0,
+  });
+  const [filters, setFilters] = useState<{
+    countries?: string[];
+    protocolVersions?: number[];
+    userAgents?: string[];
+    organizations?: string[];
+  }>({});
 
-  // Mock data generation moved inside hook if needed, or keep memoized outside
   const mockHeatmapPoints: HeatmapPoint[] = useMemo(
     () => [
-      /* ... same as before ... */ [40.7, -74.0, 25],
+      [40.7, -74.0, 25],
       [51.5, -0.1, 18],
       [35.7, 139.7, 12],
       [-33.9, 151.2, 9],
@@ -66,7 +81,6 @@ const useBitnodesData = () => {
   );
   const mockIndividualNodes: ProcessedNode[] = useMemo(
     () => [
-      /* ... mock individual nodes ... */
       { lat: 40.7128, lon: -74.006, userAgent: "/Mock:1.0/", country: "US" },
       { lat: 51.5074, lon: -0.1278, userAgent: "/Mock:1.0/", country: "GB" },
     ],
@@ -77,25 +91,22 @@ const useBitnodesData = () => {
     const fetchAndProcessNodes = async () => {
       setLoading(true);
       setError(null);
-      console.log("Fetching Bitnodes data...");
-
       try {
         const response = await fetch(BITNODES_API_URL);
-        if (!response.ok)
-          throw new Error(
-            `API Error: ${response.status} ${response.statusText}`
-          );
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
-        console.log("Raw API response received.");
-
         if (!data?.nodes) throw new Error("Invalid API response structure.");
 
         const nodes = Object.entries(data.nodes);
-        console.log(`Processing ${nodes.length} raw node entries...`);
-
-        // --- Process for Individual Markers ---
         const processedNodes: ProcessedNode[] = [];
-        nodes.forEach(([_, nodeData]: [string, any[]]) => {
+        const countrySet = new Set<string>();
+        const userAgentCounts = new Map<string, number>();
+        const orgCounts = new Map<string, number>();
+        const versionCounts = new Map<number, number>();
+        let totalUptime = 0;
+        let uptimeCount = 0;
+
+        nodes.forEach(([_, nodeData]: [string, unknown]) => {
           if (
             Array.isArray(nodeData) &&
             nodeData.length > 12 &&
@@ -104,46 +115,91 @@ const useBitnodesData = () => {
             !isNaN(nodeData[8]) &&
             !isNaN(nodeData[9])
           ) {
-            processedNodes.push({
+            const node: ProcessedNode = {
               lat: nodeData[8],
               lon: nodeData[9],
               userAgent: nodeData[1] as string,
               country: nodeData[7] as string | null,
               protocolVersion: nodeData[0] as number,
               organization: nodeData[12] as string | null,
-            });
+              connectedSince: nodeData[2] as number,
+            };
+            processedNodes.push(node);
+
+            if (node.country) countrySet.add(node.country);
+            if (node.userAgent) {
+              userAgentCounts.set(
+                node.userAgent,
+                (userAgentCounts.get(node.userAgent) || 0) + 1
+              );
+            }
+            if (node.organization) {
+              orgCounts.set(
+                node.organization,
+                (orgCounts.get(node.organization) || 0) + 1
+              );
+            }
+            if (node.protocolVersion) {
+              versionCounts.set(
+                node.protocolVersion,
+                (versionCounts.get(node.protocolVersion) || 0) + 1
+              );
+            }
+            if (node.connectedSince) {
+              totalUptime += Date.now() / 1000 - node.connectedSince;
+              uptimeCount++;
+            }
           }
         });
-        // Limit nodes for marker performance if necessary
-        setIndividualNodes(processedNodes.slice(0, MAX_NODES_FOR_MARKERS));
-        console.log(
-          `Prepared ${Math.min(
-            processedNodes.length,
-            MAX_NODES_FOR_MARKERS
-          )} nodes for markers.`
-        );
 
-        // --- Aggregate for Heatmap ---
+        // Apply filters
+        const filteredNodes = processedNodes.filter((node) => {
+          if (
+            filters.countries?.length &&
+            !filters.countries.includes(node.country || "")
+          )
+            return false;
+          if (
+            filters.protocolVersions?.length &&
+            !filters.protocolVersions.includes(node.protocolVersion || 0)
+          )
+            return false;
+          if (
+            filters.userAgents?.length &&
+            !filters.userAgents.includes(node.userAgent || "")
+          )
+            return false;
+          if (
+            filters.organizations?.length &&
+            !filters.organizations.includes(node.organization || "")
+          )
+            return false;
+          return true;
+        });
+
+        setIndividualNodes(filteredNodes.slice(0, MAX_NODES_FOR_MARKERS));
+
+        // Aggregate for heatmap
         const aggregationMap = new Map<
           string,
           { lat: number; lon: number; count: number }
         >();
         let currentMaxIntensity = 0;
-        processedNodes.forEach((node) => {
-          // Aggregate from already processed nodes
+        filteredNodes.forEach((node) => {
           const key = `${node.lat.toFixed(
             AGGREGATION_PRECISION
           )},${node.lon.toFixed(AGGREGATION_PRECISION)}`;
           const existing = aggregationMap.get(key);
           if (existing) {
             existing.count += 1;
-            if (existing.count > currentMaxIntensity)
-              currentMaxIntensity = existing.count;
+            currentMaxIntensity = Math.max(currentMaxIntensity, existing.count);
           } else {
-            const newLat = parseFloat(node.lat.toFixed(AGGREGATION_PRECISION));
-            const newLon = parseFloat(node.lon.toFixed(AGGREGATION_PRECISION));
-            aggregationMap.set(key, { lat: newLat, lon: newLon, count: 1 });
-            if (1 > currentMaxIntensity) currentMaxIntensity = 1; // Handle first node
+            aggregationMap.set(key, {
+              lat: parseFloat(node.lat.toFixed(AGGREGATION_PRECISION)),
+              lon: parseFloat(node.lon.toFixed(AGGREGATION_PRECISION)),
+              count: 1,
+            });
+            currentMaxIntensity = Math.max(currentMaxIntensity, 1);
           }
         });
 
@@ -151,55 +207,90 @@ const useBitnodesData = () => {
           aggregationMap.values()
         ).map((agg) => [agg.lat, agg.lon, agg.count]);
 
-        console.log(
-          `Aggregated into ${aggregatedPoints.length} heatmap points.`
-        );
-        // Adjust max intensity dynamically (e.g., 95th percentile or capped max)
-        // Simple approach: use the actual max, or a fraction of it if it's too high
-        const calculatedMax = Math.max(1, Math.ceil(currentMaxIntensity * 0.8)); // Cap at 80% of true max? Adjust.
+        const calculatedMax = Math.max(1, Math.ceil(currentMaxIntensity * 0.8));
         setMaxIntensity(calculatedMax);
-        console.log(
-          `Calculated Max Intensity for heatmap: ${calculatedMax} (True max was ${currentMaxIntensity})`
+        setHeatmapPoints(
+          aggregatedPoints.length > 0 ? aggregatedPoints : mockHeatmapPoints
+        );
+        setIndividualNodes(
+          filteredNodes.length > 0 ? filteredNodes : mockIndividualNodes
         );
 
-        if (aggregatedPoints.length > 0) {
-          setHeatmapPoints(aggregatedPoints);
-        } else {
-          setHeatmapPoints(mockHeatmapPoints); // Use mock data if processing yields nothing
-        }
-        if (processedNodes.length === 0) {
-          setIndividualNodes(mockIndividualNodes);
-        }
-      } catch (err) {
-        console.error("Failed to fetch or process Bitnodes data:", err);
-        setError(
-          err instanceof Error ? err.message : "An unknown error occurred"
+        // Compute analytics
+        const topAgents = Array.from(userAgentCounts.entries())
+          .map(([agent, count]) => ({ agent, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+        const topOrgs = Array.from(orgCounts.entries())
+          .map(([org, count]) => ({ org, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+        const protocolVersions = Array.from(versionCounts.entries())
+          .map(([version, count]) => ({ version, count }))
+          .sort((a, b) => b.count - a.count);
+
+        // HHI for decentralization
+        const countryCounts = new Map<string, number>();
+        processedNodes.forEach((node) => {
+          if (node.country) {
+            countryCounts.set(
+              node.country,
+              (countryCounts.get(node.country) || 0) + 1
+            );
+          }
+        });
+        const totalNodes = processedNodes.length;
+        const hhi = Array.from(countryCounts.values()).reduce(
+          (sum, count) => sum + Math.pow(count / totalNodes, 2),
+          0
         );
-        setHeatmapPoints(mockHeatmapPoints); // Use mock data on error
+
+        setAnalytics({
+          totalNodes: processedNodes.length,
+          uniqueCountries: countrySet.size,
+          topUserAgents: topAgents,
+          topOrganizations: topOrgs,
+          protocolVersions,
+          averageUptime:
+            uptimeCount > 0 ? totalUptime / uptimeCount / 86400 : 0,
+          decentralizationScore: hhi,
+        });
+      } catch (err) {
+        console.error("Error:", err);
+        setError(err instanceof Error ? err.message : "Unknown error");
+        setHeatmapPoints(mockHeatmapPoints);
         setIndividualNodes(mockIndividualNodes);
-        setMaxIntensity(50); // Reset max intensity on error
+        setMaxIntensity(50);
+        setAnalytics({ totalNodes: 0, uniqueCountries: 0 });
       } finally {
         setLoading(false);
       }
     };
 
     fetchAndProcessNodes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Removed mock data from dependency array if they are stable
+  }, [filters, mockHeatmapPoints, mockIndividualNodes]);
 
-  return { heatmapPoints, individualNodes, loading, error, maxIntensity };
+  return {
+    heatmapPoints,
+    individualNodes,
+    loading,
+    error,
+    maxIntensity,
+    analytics,
+    filters,
+    setFilters,
+  };
 };
 
-// --- Component for Individual Node Markers (using MarkerCluster) ---
+// --- Component for Individual Node Markers ---
 const NodeMarkersLayer = ({ nodes }: { nodes: ProcessedNode[] }) => {
   const map = useMap();
 
   useEffect(() => {
     if (!nodes || nodes.length === 0) return;
 
-    console.log(`Rendering marker clusters for ${nodes.length} nodes.`);
     const clusterGroup = L.markerClusterGroup({
-      maxClusterRadius: 60, // Adjust cluster radius
+      maxClusterRadius: 60,
       iconCreateFunction: (cluster) => {
         const count = cluster.getChildCount();
         let size = 40;
@@ -212,54 +303,59 @@ const NodeMarkersLayer = ({ nodes }: { nodes: ProcessedNode[] }) => {
           size = 60;
           className = "marker-cluster marker-cluster-large";
         }
-
         return L.divIcon({
-          // Using default leaflet cluster styles - customize HTML/CSS as needed
           html: `<div><span>${count}</span></div>`,
-          className: className,
+          className,
           iconSize: [size, size],
         });
       },
-      // Disable spiderfy if you prefer markers to just appear on zoom
       spiderfyOnMaxZoom: true,
-      showCoverageOnHover: false, // Optional: visual feedback on hover
+      showCoverageOnHover: false,
     });
 
     nodes.forEach((node) => {
-      // Simple circle marker - customize as needed
       const marker = L.circleMarker([node.lat, node.lon], {
-        radius: 5, // Small radius for individual nodes
-        color: "#00f9ff", // Outline color
+        radius: 5,
+        color: "#00f9ff",
         weight: 2,
-        fillColor: "#ff0099", // Fill color
+        fillColor: "#ff0099",
         fillOpacity: 0.7,
       });
 
-      // Tooltip with node details
-      let tooltipContent = `<b>Node</b><br/>Lat: ${node.lat.toFixed(
-        4
-      )}, Lon: ${node.lon.toFixed(4)}`;
-      if (node.country) tooltipContent += `<br/>Country: ${node.country}`;
+      // Enhanced tooltip with all node details
+      let tooltipContent = `<b>Node Details</b><br/>`;
+      tooltipContent += `Lat: ${node.lat.toFixed(4)}<br/>`;
+      tooltipContent += `Lon: ${node.lon.toFixed(4)}<br/>`;
+      if (node.country) tooltipContent += `Country: ${node.country}<br/>`;
       if (node.userAgent)
-        tooltipContent += `<br/>Agent: ${node.userAgent.substring(0, 30)}${
+        tooltipContent += `Agent: ${node.userAgent.substring(0, 30)}${
           node.userAgent.length > 30 ? "..." : ""
-        }`;
-      if (node.organization) tooltipContent += `<br/>Org: ${node.organization}`;
+        }<br/>`;
+      if (node.organization) tooltipContent += `Org: ${node.organization}<br/>`;
+      if (node.protocolVersion)
+        tooltipContent += `Protocol: ${node.protocolVersion}<br/>`;
+      if (node.connectedSince) {
+        tooltipContent += `Uptime: ${(
+          (Date.now() / 1000 - node.connectedSince) /
+          86400
+        ).toFixed(1)} days`;
+      }
 
-      marker.bindTooltip(tooltipContent, { direction: "top", offset: [0, -5] });
+      marker.bindTooltip(tooltipContent, {
+        direction: "top",
+        offset: [0, -5],
+        className: "node-tooltip",
+      });
       clusterGroup.addLayer(marker);
     });
 
     map.addLayer(clusterGroup);
-    console.log("Marker clusters added.");
-
     return () => {
-      console.log("Removing marker clusters.");
       map.removeLayer(clusterGroup);
     };
-  }, [nodes, map]); // Re-run if nodes or map instance change
+  }, [nodes, map]);
 
-  return null; // This component only adds/removes the layer imperatively
+  return null;
 };
 
 // --- Component to Update Zoom State ---
@@ -269,24 +365,29 @@ const ZoomHandler = ({ setZoom }: { setZoom: (zoom: number) => void }) => {
       setZoom(map.getZoom());
     },
   });
-  // Set initial zoom
   useEffect(() => {
     setZoom(map.getZoom());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map]); // Run once when map is ready
+  }, [map, setZoom]);
 
   return null;
 };
 
 // --- Main App Component ---
 const App = () => {
-  const { heatmapPoints, individualNodes, loading, error, maxIntensity } =
-    useBitnodesData();
-  const [metric, setMetric] = useState("nodes"); // Keep for potential future use
+  const {
+    heatmapPoints,
+    individualNodes,
+    loading,
+    error,
+    maxIntensity,
+    analytics,
+    filters,
+    setFilters,
+  } = useBitnodesData();
+  const [metric, setMetric] = useState("nodes");
   const initialZoom = 3;
   const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
 
-  // Map config - Memoize to prevent unnecessary re-renders
   const mapCenter: L.LatLngTuple = useMemo(() => [20, 0], []);
   const mapBounds: L.LatLngBoundsLiteral = useMemo(
     () => [
@@ -296,18 +397,15 @@ const App = () => {
     []
   );
 
-  // Callback for setting zoom state
   const handleZoomUpdate = useCallback((zoom: number) => {
     setCurrentZoom(zoom);
   }, []);
 
-  // Determine which layer to show
   const showHeatmap = !loading && currentZoom < ZOOM_THRESHOLD;
   const showMarkers = !loading && currentZoom >= ZOOM_THRESHOLD;
 
   return (
     <div className="h-screen bg-black text-[#00f9ff] flex flex-col">
-      {/* Header */}
       <header className="p-4 flex justify-between items-center bg-black border-b border-[#00f9ff] z-10 relative">
         <h1 className="text-xl md:text-2xl font-bold text-[#00f9ff]">
           Bitcoin Node Map
@@ -316,12 +414,8 @@ const App = () => {
           Zoom: {currentZoom} ( Mode:{" "}
           {showHeatmap ? "Heatmap" : showMarkers ? "Markers" : "Loading..."} )
         </div>
-        {/* Optional: Dropdown for future features
-         <select ...> ... </select>
-        */}
       </header>
 
-      {/* Status Messages */}
       {loading && (
         <div className="text-center p-4 bg-black">Loading Node Data...</div>
       )}
@@ -331,7 +425,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Map Container */}
       <div className="flex-1 relative">
         <MapContainer
           center={mapCenter}
@@ -348,25 +441,19 @@ const App = () => {
             noWrap={true}
           />
 
-          {/* Handler to update zoom state */}
           <ZoomHandler setZoom={handleZoomUpdate} />
 
-          {/* --- Conditional Layers --- */}
-
-          {/* Heatmap Layer (visible when zoomed out) */}
           {showHeatmap && heatmapPoints.length > 0 && (
             <HeatmapLayer
               points={heatmapPoints}
               longitudeExtractor={(p: HeatmapPoint) => p[1]}
               latitudeExtractor={(p: HeatmapPoint) => p[0]}
               intensityExtractor={(p: HeatmapPoint) => p[2]}
-              // --- Tune these parameters for zoomed-out visibility ---
-              radius={35} // Increased radius
-              blur={25} // Increased blur
-              max={maxIntensity} // Use dynamically calculated max intensity
-              minOpacity={0.1} // Ensure faint visibility even for low counts
+              radius={35}
+              blur={25}
+              max={maxIntensity}
+              minOpacity={0.1}
               gradient={{
-                // Example Gradient (adjust!)
                 0.1: "#00f9ff",
                 0.3: "#4a5fff",
                 0.6: "#8a2be2",
@@ -376,10 +463,16 @@ const App = () => {
             />
           )}
 
-          {/* Marker Layer (visible when zoomed in) */}
           {showMarkers && individualNodes.length > 0 && (
             <NodeMarkersLayer nodes={individualNodes} />
           )}
+
+          <FilterPanel
+            analytics={analytics}
+            filters={filters}
+            setFilters={setFilters}
+          />
+          <AnalyticsDashboard analytics={analytics} />
         </MapContainer>
       </div>
     </div>
