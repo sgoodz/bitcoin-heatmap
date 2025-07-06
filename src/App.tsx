@@ -7,7 +7,6 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import AnalyticsDashboard from "./AnalyticsDashboard";
-import FilterPanel from "./FilterPanel";
 
 // --- Constants ---
 const BITNODES_API_URL = "https://bitnodes.io/api/v1/snapshots/latest/";
@@ -63,12 +62,6 @@ const useBitnodesData = () => {
     totalNodes: 0,
     uniqueCountries: 0,
   });
-  const [filters, setFilters] = useState<{
-    countries?: string[];
-    protocolVersions?: number[];
-    userAgents?: string[];
-    organizations?: string[];
-  }>({});
 
   const mockHeatmapPoints: HeatmapPoint[] = useMemo(
     () => [
@@ -152,32 +145,8 @@ const useBitnodesData = () => {
           }
         });
 
-        // Apply filters
-        const filteredNodes = processedNodes.filter((node) => {
-          if (
-            filters.countries?.length &&
-            !filters.countries.includes(node.country || "")
-          )
-            return false;
-          if (
-            filters.protocolVersions?.length &&
-            !filters.protocolVersions.includes(node.protocolVersion || 0)
-          )
-            return false;
-          if (
-            filters.userAgents?.length &&
-            !filters.userAgents.includes(node.userAgent || "")
-          )
-            return false;
-          if (
-            filters.organizations?.length &&
-            !filters.organizations.includes(node.organization || "")
-          )
-            return false;
-          return true;
-        });
-
-        setIndividualNodes(filteredNodes.slice(0, MAX_NODES_FOR_MARKERS));
+        // No filters applied
+        setIndividualNodes(processedNodes.slice(0, MAX_NODES_FOR_MARKERS));
 
         // Aggregate for heatmap
         const aggregationMap = new Map<
@@ -185,7 +154,7 @@ const useBitnodesData = () => {
           { lat: number; lon: number; count: number }
         >();
         let currentMaxIntensity = 0;
-        filteredNodes.forEach((node) => {
+        processedNodes.forEach((node) => {
           const key = `${node.lat.toFixed(
             AGGREGATION_PRECISION
           )},${node.lon.toFixed(AGGREGATION_PRECISION)}`;
@@ -213,7 +182,7 @@ const useBitnodesData = () => {
           aggregatedPoints.length > 0 ? aggregatedPoints : mockHeatmapPoints
         );
         setIndividualNodes(
-          filteredNodes.length > 0 ? filteredNodes : mockIndividualNodes
+          processedNodes.length > 0 ? processedNodes : mockIndividualNodes
         );
 
         // Compute analytics
@@ -268,7 +237,7 @@ const useBitnodesData = () => {
     };
 
     fetchAndProcessNodes();
-  }, [filters, mockHeatmapPoints, mockIndividualNodes]);
+  }, [mockHeatmapPoints, mockIndividualNodes]);
 
   return {
     heatmapPoints,
@@ -277,8 +246,6 @@ const useBitnodesData = () => {
     error,
     maxIntensity,
     analytics,
-    filters,
-    setFilters,
   };
 };
 
@@ -381,8 +348,6 @@ const App = () => {
     error,
     maxIntensity,
     analytics,
-    filters,
-    setFilters,
   } = useBitnodesData();
   const [metric, setMetric] = useState("nodes");
   const initialZoom = 3;
@@ -429,7 +394,7 @@ const App = () => {
         <MapContainer
           center={mapCenter}
           zoom={initialZoom}
-          minZoom={2}
+          minZoom={3}
           maxBounds={mapBounds}
           maxBoundsViscosity={1.0}
           className="h-full w-full"
@@ -467,11 +432,6 @@ const App = () => {
             <NodeMarkersLayer nodes={individualNodes} />
           )}
 
-          <FilterPanel
-            analytics={analytics}
-            filters={filters}
-            setFilters={setFilters}
-          />
           <AnalyticsDashboard analytics={analytics} />
         </MapContainer>
       </div>
