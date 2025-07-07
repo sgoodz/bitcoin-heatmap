@@ -4,5 +4,6 @@ import react from "@vitejs/plugin-react";
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "/bitcoin-heatmap/",
   plugins: [react(), tailwindcss()],
 });

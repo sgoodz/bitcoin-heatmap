@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { MapContainer, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { HeatmapLayer } from "react-leaflet-heatmap-layer-v3";
@@ -15,22 +15,6 @@ const ZOOM_THRESHOLD = 9;
 const MAX_NODES_FOR_MARKERS = 10000;
 
 // --- Interfaces ---
-interface BitnodeRawData {
-  protocolVersion: number;
-  userAgent: string;
-  connectedSince: number;
-  services: string;
-  height: number;
-  hostname: string;
-  city: string | null;
-  country: string | null;
-  latitude: number;
-  longitude: number;
-  timezone: string | null;
-  asn: string | null;
-  organization: string | null;
-}
-
 interface ProcessedNode {
   lat: number;
   lon: number;
@@ -349,7 +333,6 @@ const App = () => {
     maxIntensity,
     analytics,
   } = useBitnodesData();
-  const [metric, setMetric] = useState("nodes");
   const initialZoom = 3;
   const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
 
