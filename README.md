@@ -14,7 +14,7 @@ A real-time interactive map visualizing the global distribution of Bitcoin nodes
 
 ## Demo
 
-[Live Demo on GitHub Pages](https://YOUR_USERNAME.github.io/bitcoin-heatmap/)
+[Live Demo on GitHub Pages](https://sgoodz.github.io/bitcoin-heatmap/)
 
 ## Screenshots
 
@@ -27,7 +27,7 @@ A real-time interactive map visualizing the global distribution of Bitcoin nodes
 1. **Clone the repo:**
 
    ```sh
-   git clone https://github.com/YOUR_USERNAME/bitcoin-heatmap.git
+   git clone https://github.com/sgoodz/bitcoin-heatmap.git
    cd bitcoin-heatmap
    ```
 
