@@ -14,7 +14,7 @@ const AGGREGATION_PRECISION = 1;
 const ZOOM_THRESHOLD = 9;
 const MAX_NODES_FOR_MARKERS = 10000;
 const LAST_FETCH_KEY = "bitnodes_last_fetch";
-const LAST_DATA_KEY = "bitnodes_last_data";
+const CACHED_DATA_KEY = "bitnodes_cached_data"; // Renamed for clarity
 
 // --- Interfaces ---
 interface ProcessedNode {
@@ -73,15 +73,25 @@ const useBitnodesData = () => {
 
       const now = Date.now();
       const lastFetch = Number(localStorage.getItem(LAST_FETCH_KEY));
-      const lastData = localStorage.getItem(LAST_DATA_KEY);
+      const cachedDataString = localStorage.getItem(CACHED_DATA_KEY);
 
-      // Only fetch if more than 10 minutes have passed
-      if (lastFetch && lastData && now - lastFetch < 600000) {
-        setAnalytics(JSON.parse(lastData));
+      // ** CORRECTED CACHING LOGIC: Check for and restore ALL data **
+      if (lastFetch && cachedDataString && now - lastFetch < 600000) {
+        // 10 minutes
+        console.log("Loading all data from local cache.");
+        const cachedData = JSON.parse(cachedDataString);
+
+        // Restore all the state from the single cache object
+        setHeatmapPoints(cachedData.heatmapPoints);
+        setIndividualNodes(cachedData.individualNodes);
+        setMaxIntensity(cachedData.maxIntensity);
+        setAnalytics(cachedData.analytics);
+
         setLoading(false);
-        return;
+        return; // Exit the function, preventing an unnecessary fetch
       }
 
+      console.log("Cache is stale or empty. Fetching new data from API...");
       try {
         const response = await fetch(BITNODES_API_URL);
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
@@ -118,24 +128,21 @@ const useBitnodesData = () => {
             processedNodes.push(node);
 
             if (node.country) countrySet.add(node.country);
-            if (node.userAgent) {
+            if (node.userAgent)
               userAgentCounts.set(
                 node.userAgent,
                 (userAgentCounts.get(node.userAgent) || 0) + 1
               );
-            }
-            if (node.organization) {
+            if (node.organization)
               orgCounts.set(
                 node.organization,
                 (orgCounts.get(node.organization) || 0) + 1
               );
-            }
-            if (node.protocolVersion) {
+            if (node.protocolVersion)
               versionCounts.set(
                 node.protocolVersion,
                 (versionCounts.get(node.protocolVersion) || 0) + 1
               );
-            }
             if (node.connectedSince) {
               totalUptime += Date.now() / 1000 - node.connectedSince;
               uptimeCount++;
@@ -143,10 +150,7 @@ const useBitnodesData = () => {
           }
         });
 
-        // No filters applied
-        setIndividualNodes(processedNodes.slice(0, MAX_NODES_FOR_MARKERS));
-
-        // Aggregate for heatmap
+        // --- Data Aggregation and Analytics ---
         const aggregationMap = new Map<
           string,
           { lat: number; lon: number; count: number }
@@ -169,21 +173,11 @@ const useBitnodesData = () => {
             currentMaxIntensity = Math.max(currentMaxIntensity, 1);
           }
         });
-
         const aggregatedPoints: HeatmapPoint[] = Array.from(
           aggregationMap.values()
         ).map((agg) => [agg.lat, agg.lon, agg.count]);
-
         const calculatedMax = Math.max(1, Math.ceil(currentMaxIntensity * 0.8));
-        setMaxIntensity(calculatedMax);
-        setHeatmapPoints(
-          aggregatedPoints.length > 0 ? aggregatedPoints : mockHeatmapPoints
-        );
-        setIndividualNodes(
-          processedNodes.length > 0 ? processedNodes : mockIndividualNodes
-        );
 
-        // Compute analytics
         const topAgents = Array.from(userAgentCounts.entries())
           .map(([agent, count]) => ({ agent, count }))
           .sort((a, b) => b.count - a.count)
@@ -196,15 +190,13 @@ const useBitnodesData = () => {
           .map(([version, count]) => ({ version, count }))
           .sort((a, b) => b.count - a.count);
 
-        // HHI for decentralization
         const countryCounts = new Map<string, number>();
         processedNodes.forEach((node) => {
-          if (node.country) {
+          if (node.country)
             countryCounts.set(
               node.country,
               (countryCounts.get(node.country) || 0) + 1
             );
-          }
         });
         const totalNodes = processedNodes.length;
         const hhi = Array.from(countryCounts.values()).reduce(
@@ -222,12 +214,33 @@ const useBitnodesData = () => {
             uptimeCount > 0 ? totalUptime / uptimeCount / 86400 : 0,
           decentralizationScore: hhi,
         };
-        setAnalytics(processedAnalytics);
+
+        // ** CORRECTED CACHING LOGIC: Save a single object with all data **
+        const dataToCache = {
+          heatmapPoints:
+            aggregatedPoints.length > 0 ? aggregatedPoints : mockHeatmapPoints,
+          individualNodes:
+            processedNodes.length > 0
+              ? processedNodes.slice(0, MAX_NODES_FOR_MARKERS)
+              : mockIndividualNodes,
+          maxIntensity: calculatedMax,
+          analytics: processedAnalytics,
+        };
+
         localStorage.setItem(LAST_FETCH_KEY, String(Date.now()));
-        localStorage.setItem(LAST_DATA_KEY, JSON.stringify(processedAnalytics));
+        localStorage.setItem(CACHED_DATA_KEY, JSON.stringify(dataToCache));
+
+        // Set state from the newly created data object
+        setHeatmapPoints(dataToCache.heatmapPoints);
+        setIndividualNodes(dataToCache.individualNodes);
+        setMaxIntensity(dataToCache.maxIntensity);
+        setAnalytics(dataToCache.analytics);
       } catch (err) {
-        console.error("Error:", err);
-        setError(err instanceof Error ? err.message : "Unknown error");
+        console.error("Error fetching or processing data:", err);
+        setError(
+          err instanceof Error ? err.message : "An unknown error occurred"
+        );
+        // Fallback to mock data on error
         setHeatmapPoints(mockHeatmapPoints);
         setIndividualNodes(mockIndividualNodes);
         setMaxIntensity(50);
@@ -290,7 +303,6 @@ const NodeMarkersLayer = ({ nodes }: { nodes: ProcessedNode[] }) => {
         fillOpacity: 0.7,
       });
 
-      // Enhanced tooltip with all node details
       let tooltipContent = `<b>Node Details</b><br/>`;
       tooltipContent += `Lat: ${node.lat.toFixed(4)}<br/>`;
       tooltipContent += `Lon: ${node.lon.toFixed(4)}<br/>`;
@@ -342,7 +354,6 @@ const ZoomHandler = ({ setZoom }: { setZoom: (zoom: number) => void }) => {
 
 // --- Main App Component ---
 const App = () => {
-  // Detect mobile device
   const isMobile =
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 767px)").matches;
@@ -376,7 +387,6 @@ const App = () => {
 
   return (
     <div className="h-screen bg-black text-[#00f9ff] flex flex-col">
-      {/* Header and zoom box are always rendered, regardless of error/loading */}
       <header className="p-4 flex justify-center items-center bg-black border-b border-[#00f9ff] z-10 relative">
         <h1 className="text-xl md:text-2xl font-bold text-[#00f9ff] font-orbitron text-center w-full">
           Bitcoin Node Map
@@ -411,9 +421,7 @@ const App = () => {
             attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>'
             noWrap={true}
           />
-
           <ZoomHandler setZoom={handleZoomUpdate} />
-
           {showHeatmap && heatmapPoints.length > 0 && (
             <HeatmapLayer
               points={heatmapPoints}
@@ -433,11 +441,9 @@ const App = () => {
               }}
             />
           )}
-
           {showMarkers && individualNodes.length > 0 && (
             <NodeMarkersLayer nodes={individualNodes} />
           )}
-
           <AnalyticsDashboard analytics={analytics} />
         </MapContainer>
       </div>
