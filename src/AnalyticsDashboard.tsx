@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 interface AnalyticsDashboardProps {
   analytics: {
@@ -15,19 +15,29 @@ interface AnalyticsDashboardProps {
 const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   analytics,
 }) => {
+  // Collapsed by default on mobile, open by default on desktop
   const [isOpen, setIsOpen] = useState(true);
 
+  useEffect(() => {
+    // If on mobile, collapse by default
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setIsOpen(false);
+    } else {
+      setIsOpen(true);
+    }
+  }, []);
+
   return (
-    <div className="absolute bottom-4 right-4 z-[1000] text-[#00f9ff] font-mono">
+    <div className="fixed bottom-0 left-0 w-full z-[2000] text-[#00f9ff] font-mono flex flex-col items-center md:items-end md:justify-end md:absolute md:bottom-4 md:right-4 md:w-auto">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="mb-2 px-4 py-2 bg-black border border-[#00f9ff] rounded hover:bg-[#00f9ff] hover:text-black transition"
+        className="mb-2 px-4 py-2 bg-black border border-[#00f9ff] rounded hover:bg-[#00f9ff] hover:text-black transition w-full md:w-auto md:mr-0 md:ml-auto"
       >
         {isOpen ? "Hide Analytics" : "Show Analytics"}
       </button>
 
       {isOpen && (
-        <div className="bg-black bg-opacity-90 p-4 rounded-lg border border-[#00f9ff] w-64 shadow-[0_0_10px_#00f9ff]">
+        <div className="bg-black bg-opacity-95 p-3 rounded-t-lg border-t border-[#00f9ff] w-full shadow-[0_0_10px_#00f9ff] max-h-[60vh] overflow-y-auto md:rounded-lg md:border md:p-4 md:w-64 md:max-h-none md:overflow-visible">
           <h2 className="text-lg font-bold mb-2">Node Analytics</h2>
           <div className="space-y-2">
             <p>

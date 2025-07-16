@@ -13,6 +13,8 @@ const BITNODES_API_URL = "https://bitnodes.io/api/v1/snapshots/latest/";
 const AGGREGATION_PRECISION = 1;
 const ZOOM_THRESHOLD = 9;
 const MAX_NODES_FOR_MARKERS = 10000;
+const LAST_FETCH_KEY = "bitnodes_last_fetch";
+const LAST_DATA_KEY = "bitnodes_last_data";
 
 // --- Interfaces ---
 interface ProcessedNode {
@@ -68,6 +70,18 @@ const useBitnodesData = () => {
     const fetchAndProcessNodes = async () => {
       setLoading(true);
       setError(null);
+
+      const now = Date.now();
+      const lastFetch = Number(localStorage.getItem(LAST_FETCH_KEY));
+      const lastData = localStorage.getItem(LAST_DATA_KEY);
+
+      // Only fetch if more than 10 minutes have passed
+      if (lastFetch && lastData && now - lastFetch < 600000) {
+        setAnalytics(JSON.parse(lastData));
+        setLoading(false);
+        return;
+      }
+
       try {
         const response = await fetch(BITNODES_API_URL);
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
@@ -198,7 +212,7 @@ const useBitnodesData = () => {
           0
         );
 
-        setAnalytics({
+        const processedAnalytics = {
           totalNodes: processedNodes.length,
           uniqueCountries: countrySet.size,
           topUserAgents: topAgents,
@@ -207,7 +221,10 @@ const useBitnodesData = () => {
           averageUptime:
             uptimeCount > 0 ? totalUptime / uptimeCount / 86400 : 0,
           decentralizationScore: hhi,
-        });
+        };
+        setAnalytics(processedAnalytics);
+        localStorage.setItem(LAST_FETCH_KEY, String(Date.now()));
+        localStorage.setItem(LAST_DATA_KEY, JSON.stringify(processedAnalytics));
       } catch (err) {
         console.error("Error:", err);
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -325,6 +342,10 @@ const ZoomHandler = ({ setZoom }: { setZoom: (zoom: number) => void }) => {
 
 // --- Main App Component ---
 const App = () => {
+  // Detect mobile device
+  const isMobile =
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 767px)").matches;
   const {
     heatmapPoints,
     individualNodes,
@@ -333,7 +354,8 @@ const App = () => {
     maxIntensity,
     analytics,
   } = useBitnodesData();
-  const initialZoom = 3;
+  const initialZoom = isMobile ? 2 : 3;
+  const minZoom = isMobile ? 2 : 3;
   const [currentZoom, setCurrentZoom] = useState<number>(initialZoom);
 
   const mapCenter: L.LatLngTuple = useMemo(() => [20, 0], []);
@@ -354,15 +376,15 @@ const App = () => {
 
   return (
     <div className="h-screen bg-black text-[#00f9ff] flex flex-col">
-      <header className="p-4 flex justify-between items-center bg-black border-b border-[#00f9ff] z-10 relative">
-        <h1 className="text-xl md:text-2xl font-bold text-[#00f9ff]">
+      {/* Header and zoom box are always rendered, regardless of error/loading */}
+      <header className="p-4 flex justify-center items-center bg-black border-b border-[#00f9ff] z-10 relative">
+        <h1 className="text-xl md:text-2xl font-bold text-[#00f9ff] font-orbitron text-center w-full">
           Bitcoin Node Map
         </h1>
-        <div className="text-sm md:text-base">
-          Zoom: {currentZoom} ( Mode:{" "}
-          {showHeatmap ? "Heatmap" : showMarkers ? "Markers" : "Loading..."} )
-        </div>
       </header>
+      <div className="fixed top-[78px] right-[13px] z-[2000] bg-black bg-opacity-80 px-4 py-2 rounded border border-[#00f9ff] text-sm md:text-base">
+        Zoom: {currentZoom}
+      </div>
 
       {loading && (
         <div className="text-center p-4 bg-black">Loading Node Data...</div>
@@ -377,11 +399,12 @@ const App = () => {
         <MapContainer
           center={mapCenter}
           zoom={initialZoom}
-          minZoom={3}
+          minZoom={minZoom}
           maxBounds={mapBounds}
           maxBoundsViscosity={1.0}
           className="h-full w-full"
           style={{ background: "#000" }}
+          zoomDelta={isMobile ? 2 : 1}
         >
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
